@@ -41,5 +41,4 @@ Una vez levantado el frontend y el backend:
 1.  Abre el navegador en `http://localhost:5173`.
 2.  Haz clic en **"¿No tienes una cuenta? Regístrate aquí"** para crear un usuario administrador directamente.
 3.  O bien, puedes iniciar sesión con los datos de prueba generados por el backend (si corriste los seeders):
-    *   **Usuario:** `test@example.com`
-    *   **Contraseña:** `password`
+
