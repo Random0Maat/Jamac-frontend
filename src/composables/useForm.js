@@ -2,7 +2,11 @@ import { ref, reactive, isRef } from 'vue';
 import axios from 'axios';
 
 // Set up base Axios URL pointing to the Laravel API
-axios.defaults.baseURL = 'http://localhost:8000/api';
+//para el desarrollo local
+//axios.defaults.baseURL = 'http://localhost:8000/api';
+
+//para ambiente DEV en AWS EC2:
+axios.defaults.baseURL = 'http://3.17.70.189:8000/api';
 
 // Apply the Bearer token automatically if it exists in localStorage
 const token = localStorage.getItem('auth_token');

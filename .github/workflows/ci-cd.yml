@@ -36,7 +36,7 @@ jobs:
           retention-days: 14
   
   deploy-dev:
-    name: Deploy a DEV (simulado)
+    name: Deploy a DEV (EC2)
     needs: build
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -51,14 +51,30 @@ jobs:
           name: phoenix-orders-frontend
           path: dist
 
-      - name: Simular despliegue a DEV
-        run: |
-          echo "===================================="
-          echo "Desplegando Frontend Phoenix Orders a DEV"
-          echo "===================================="
-          echo "Artifact descargado correctamente."
-          echo "Contenido preparado para despliegue:"
-          ls -la dist
-          echo "Desplegando aplicación en ambiente DEV (simulado)..."
-          sleep 2
-          echo "Deploy a DEV completado exitosamente"
+      - name: Limpiar directorio DEV en el servidor
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            sudo mkdir -p /var/www/frontend
+            sudo chown -R $USER:$USER /var/www/frontend
+
+            rm -rf /var/www/frontend/*
+            rm -rf /var/www/frontend/.[!.]* 2>/dev/null || true
+
+            echo "Directorio /var/www/frontend preparado correctamente."
+
+      - name: Copiar archivos al servidor EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          source: "dist/**"
+          target: "/var/www/frontend"
+          strip_components: 1
+          rm: false
