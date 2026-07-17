@@ -1,0 +1,61 @@
+name: CI/CD Frontend Phoenix Orders
+
+on:
+  push:
+    branches: [main]
+
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+      
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Compilar Frontend
+        run: npm run build
+
+      - name: Subir Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phoenix-orders-frontend
+          path: dist/
+          retention-days: 14
+  
+  deploy-dev:
+    name: Deploy a DEV (simulado)
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: phoenix-orders-frontend
+          path: dist
+
+      - name: Simular despliegue a DEV
+        run: |
+          echo "===================================="
+          echo "Desplegando Frontend Phoenix Orders a DEV"
+          echo "===================================="
+          echo "Artifact descargado correctamente."
+          echo "Contenido preparado para despliegue:"
+          ls -la dist
+          echo "Desplegando aplicación en ambiente DEV (simulado)..."
+          sleep 2
+          echo "Deploy a DEV completado exitosamente"
