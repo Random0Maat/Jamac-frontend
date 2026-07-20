@@ -3,9 +3,11 @@ name: CI/CD Frontend Phoenix Orders
 on:
   push:
     branches: [ main, "feature/**" ]
-
   pull_request:
-    branches: [main]
+    branches: [ main ]
+
+env:
+  IMAGE_NAME: ghcr.io/random0maat/jamac-frontend
 
 jobs:
   build:
@@ -15,29 +17,56 @@ jobs:
     steps:
       - name: Descargar código
         uses: actions/checkout@v4
-      
+
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
-      
+
       - name: Instalar dependencias
         run: npm ci
 
-      - name: Compilar Frontend
+      - name: Compilar Frontend (verificación de build)
         run: npm run build
 
-      - name: Subir Artifact
-        uses: actions/upload-artifact@v4
+  build-and-push-image:
+    name: Build y Push de Imagen Docker
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login en GitHub Container Registry
+        uses: docker/login-action@v3
         with:
-          name: phoenix-orders-frontend
-          path: dist/
-          retention-days: 14
-  
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build y Push de la imagen
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   deploy-dev:
     name: Deploy a DEV (EC2)
-    needs: build
+    needs: build-and-push-image
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
 
@@ -45,13 +74,7 @@ jobs:
       name: DEV
 
     steps:
-      - name: Descargar Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: phoenix-orders-frontend
-          path: dist
-
-      - name: Limpiar directorio DEV en el servidor
+      - name: Desplegar imagen Docker en el servidor
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_IP }}
@@ -59,22 +82,37 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           script: |
-            sudo mkdir -p /var/www/frontend
-            sudo chown -R $USER:$USER /var/www/frontend
+            if ! command -v docker &> /dev/null; then
+              echo "Docker no está instalado. Instalando..."
+              sudo apt-get update -y
+              sudo apt-get install -y ca-certificates curl gnupg
+              sudo install -m 0755 -d /etc/apt/keyrings
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+              sudo chmod a+r /etc/apt/keyrings/docker.gpg
+              echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+              sudo apt-get update -y
+              sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+              sudo usermod -aG docker $USER
+              echo "Docker instalado correctamente."
+            else
+              echo "Docker ya está instalado, continuando..."
+            fi
 
-            rm -rf /var/www/frontend/*
-            rm -rf /var/www/frontend/.[!.]* 2>/dev/null || true
+            echo "Descargando la nueva imagen desde el registry..."
+            sudo docker pull ${{ env.IMAGE_NAME }}:latest
 
-            echo "Directorio /var/www/frontend preparado correctamente."
+            echo "Deteniendo el contenedor anterior (si existe)..."
+            sudo docker stop jamac-frontend || true
+            sudo docker rm jamac-frontend || true
 
-      - name: Copiar archivos al servidor EC2
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SERVER_IP }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
-          source: "dist/**"
-          target: "/var/www/frontend"
-          strip_components: 1
-          rm: false
+            echo "Levantando el contenedor nuevo..."
+            sudo docker run -d \
+              --name jamac-frontend \
+              -p 80:80 \
+              --restart unless-stopped \
+              ${{ env.IMAGE_NAME }}:latest
+
+            echo "Limpiando imágenes viejas sin usar..."
+            sudo docker image prune -f
+
+            echo "✅ Despliegue con Docker completado exitosamente"
