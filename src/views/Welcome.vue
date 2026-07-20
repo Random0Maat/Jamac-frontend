@@ -90,7 +90,7 @@ const getStatusLabel = (status) => {
         <div class="overflow-hidden bg-gradient-to-r from-indigo-600 to-purple-700 shadow-lg sm:rounded-2xl text-white p-8">
           <h1 class="text-2xl font-extrabold mb-2 text-white">¡Bienvenido al Panel de Control de Ventas!</h1>
           <p class="text-indigo-100 max-w-2xl text-sm leading-relaxed">
-            Aquí tienes un resumen de la actividad comercial y el inventario disponible de Phoenix Orders. Usa los accesos directos para agilizar las operaciones de facturación.
+            Aquí tienes un resumen de la actividad comercial y el inventario disponible de Phoenix Orders. Usa los accesos directos para agilizar las operaciones de facturación...
           </p>
         </div>
 
