@@ -10,6 +10,35 @@ env:
   IMAGE_NAME: ghcr.io/random0maat/jamac-frontend
 
 jobs:
+  # ==========================================
+  # 1: AUDITORÍA DE SEGURIDAD (ESTÁTICA)
+  # ==========================================
+  security-audit:
+    name: DevSecOps - Linter & Secret Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      # 1. Hadolint: Linter para el Dockerfile Nginx/Vue
+      - name: Run Hadolint (Dockerfile Linter)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: error
+
+      # 2. Trivy Secrets: Escaneo de secretos/tokens en el código fuente
+      - name: Run Trivy Secret Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scanners: 'secret'
+          exit-code: '1'
+
+  # ==========================================
+  # 2: VERIFICACIÓN Y COMPILACIÓN NODE.JS
+  # ==========================================
   build:
     name: Build Frontend
     runs-on: ubuntu-latest
@@ -30,9 +59,12 @@ jobs:
       - name: Compilar Frontend (verificación de build)
         run: npm run build
 
+  # ==========================================
+  # 3: CONSTRUCCIÓN, ESCANEO Y PUSH DOCKER
+  # ==========================================      
   build-and-push-image:
     name: Build y Push de Imagen Docker
-    needs: build
+    needs: [security-audit, build]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -53,6 +85,39 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Compilar la imagen localmente para auditoría previa al Push
+      - name: Build local de la imagen para análisis
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:temp-scan
+          cache-from: type=gha
+
+      # 3. Trivy Image: Vulnerabilidades en la imagen Nginx/Alpine
+      - name: Run Trivy Image Vulnerability Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'image'
+          image-ref: '${{ env.IMAGE_NAME }}:temp-scan'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      # 4. Syft: Generación del SBOM (Inventario de paquetes)
+      - name: Generate SBOM with Syft
+        uses: anchore/sbom-action@v0
+        with:
+          image: '${{ env.IMAGE_NAME }}:temp-scan'
+          format: 'spdx-json'
+          output-file: 'sbom-frontend.json'
+
+      - name: Subir SBOM como Artefacto de GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-frontend-manifest
+          path: sbom-frontend.json    
+
+      # Publicar la imagen limpia en GHCR    
       - name: Build y Push de la imagen
         uses: docker/build-push-action@v6
         with:
