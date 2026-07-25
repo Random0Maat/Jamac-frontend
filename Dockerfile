@@ -12,10 +12,15 @@ RUN npm run build
 # Etapa 2: Producción — sirve los archivos estáticos con Nginx
 FROM nginx:1-alpine-slim
 
-# Crear usuario no-root
+
+#  Instalar libcap
+RUN apk add --no-cache libcap
+
+# Crear usuario, dar permisos y autorizar el puerto 80 
 RUN addgroup -g 1000 appgroup && \
     adduser -D -u 1000 -G appgroup appuser && \
-    chown -R appuser:appgroup /usr/share/nginx/html /var/cache/nginx /var/run /var/log/nginx
+    chown -R appuser:appgroup /usr/share/nginx/html /var/cache/nginx /var/run /var/log/nginx /run && \
+    setcap 'cap_net_bind_service=+ep' /usr/sbin/nginx
 
 # Copiar archivos de build
 COPY --from=build /app/dist /usr/share/nginx/html
