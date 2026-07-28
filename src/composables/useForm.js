@@ -6,7 +6,7 @@ import axios from 'axios';
 //axios.defaults.baseURL = 'http://localhost:8000/api';
 
 //para ambiente DEV en AWS EC2:
-axios.defaults.baseURL = 'http://3.17.70.189:8000/api';
+axios.defaults.baseURL = 'http://3.15.41.152:8000/api';
 
 // Apply the Bearer token automatically if it exists in localStorage
 const token = localStorage.getItem('auth_token');
