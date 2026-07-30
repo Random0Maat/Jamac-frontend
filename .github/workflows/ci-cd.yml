@@ -129,9 +129,55 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # ==========================================
+  # 4: APROVISIONAMIENTO DE INFRAESTRUCTURA (IaC)
+  # ==========================================
+  provision-infra:
+    name: Provisionar Servidor (Terraform)
+    needs: [security-audit, build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+
+    outputs:
+      public_ip: ${{ steps.tf-output.outputs.public_ip }}
+
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.0"
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=frontend/terraform.tfstate" \
+            -backend-config="region=${{ secrets.AWS_REGION }}"
+
+      - name: Terraform Apply
+        run: |
+          terraform apply -auto-approve \
+            -var="aws_region=${{ secrets.AWS_REGION }}"
+
+      - name: Exportar IP publica
+        id: tf-output
+        run: echo "public_ip=$(terraform output -raw public_ip)" >> "$GITHUB_OUTPUT"
+
   deploy-dev:
     name: Deploy a DEV (EC2)
-    needs: build-and-push-image
+    needs: [build-and-push-image, provision-infra]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
 
@@ -139,10 +185,22 @@ jobs:
       name: DEV
 
     steps:
+      - name: Esperar a que el servidor este listo (SSH)
+        run: |
+          echo "Esperando que ${{ needs.provision-infra.outputs.public_ip }} responda en el puerto 22..."
+          for i in $(seq 1 20); do
+            if nc -z -w3 ${{ needs.provision-infra.outputs.public_ip }} 22; then
+              echo "SSH listo."
+              break
+            fi
+            echo "Intento $i/20, esperando 10s..."
+            sleep 10
+          done
+
       - name: Desplegar imagen Docker en el servidor
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SERVER_IP }}
+          host: ${{ needs.provision-infra.outputs.public_ip }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
