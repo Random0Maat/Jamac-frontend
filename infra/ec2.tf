@@ -60,3 +60,15 @@ resource "aws_instance" "frontend" {
     Name = var.app_name
   }
 }
+resource "aws_eip" "frontend" {
+  domain = "vpc"
+
+  tags = {
+    Name = "${var.app_name}-eip"
+  }
+}
+
+resource "aws_eip_association" "frontend" {
+  instance_id   = aws_instance.frontend.id
+  allocation_id = aws_eip.frontend.id
+}
