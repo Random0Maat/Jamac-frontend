@@ -33,4 +33,4 @@ EXPOSE 80
 
 # Añadir HEALTHCHECK
 HEALTHCHECK --interval=30s --timeout=10s \
-  CMD wget -qO- http://localhost:80/ || exit 1
+  CMD wget -qO- http://127.0.0.1:80/ || exit 1
