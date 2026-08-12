@@ -129,55 +129,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ==========================================
-  # 4: APROVISIONAMIENTO DE INFRAESTRUCTURA (IaC)
-  # ==========================================
-  provision-infra:
-    name: Provisionar Servidor (Terraform)
-    needs: [security-audit, build]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-
-    outputs:
-      public_ip: ${{ steps.tf-output.outputs.public_ip }}
-
-    defaults:
-      run:
-        working-directory: infra
-
-    steps:
-      - name: Descargar código
-        uses: actions/checkout@v4
-
-      - name: Configurar Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.9.0"
-
-      - name: Terraform Init
-        run: |
-          terraform init \
-            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
-            -backend-config="key=frontend/terraform.tfstate" \
-            -backend-config="region=${{ secrets.AWS_REGION }}"
-
-      - name: Terraform Apply
-        run: |
-          terraform apply -auto-approve \
-            -var="aws_region=${{ secrets.AWS_REGION }}"
-
-      - name: Exportar IP publica
-        id: tf-output
-        run: echo "public_ip=$(terraform output -raw public_ip)" >> "$GITHUB_OUTPUT"
-
   deploy-dev:
     name: Deploy a DEV (EC2)
-    needs: [build-and-push-image, provision-infra]
+    needs: [build-and-push-image]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
 
@@ -185,57 +139,35 @@ jobs:
       name: DEV
 
     steps:
-      - name: Esperar a que el servidor este listo (SSH)
-        run: |
-          echo "Esperando que ${{ needs.provision-infra.outputs.public_ip }} responda en el puerto 22..."
-          for i in $(seq 1 20); do
-            if nc -z -w3 ${{ needs.provision-infra.outputs.public_ip }} 22; then
-              echo "SSH listo."
-              break
-            fi
-            echo "Intento $i/20, esperando 10s..."
-            sleep 10
-          done
+      - name: Checkout código
+        uses: actions/checkout@v4
 
-      - name: Desplegar imagen Docker en el servidor
+      - name: Copiar carpeta kubernetes al servidor
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          source: "kubernetes/"
+          target: "/home/${{ secrets.SERVER_USER }}/"
+
+      - name: Desplegar en Kubernetes (EC2)
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ needs.provision-infra.outputs.public_ip }}
+          host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           script: |
-            if ! command -v docker &> /dev/null; then
-              echo "Docker no está instalado. Instalando..."
-              sudo apt-get update -y
-              sudo apt-get install -y ca-certificates curl gnupg
-              sudo install -m 0755 -d /etc/apt/keyrings
-              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-              sudo chmod a+r /etc/apt/keyrings/docker.gpg
-              echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-              sudo apt-get update -y
-              sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-              sudo usermod -aG docker $USER
-              echo "Docker instalado correctamente."
-            else
-              echo "Docker ya está instalado, continuando..."
-            fi
+            echo "Aplicando manifiestos de Kubernetes..."
+            kubectl apply -f kubernetes/frontend-deployment.yaml
+            kubectl apply -f kubernetes/frontend-service.yaml
 
-            echo "Descargando la nueva imagen desde el registry..."
-            sudo docker pull ${{ env.IMAGE_NAME }}:latest
+            echo "Reiniciando el despliegue del frontend para forzar descarga de la última imagen..."
+            kubectl rollout restart deployment/jamac-frontend
 
-            echo "Deteniendo el contenedor anterior (si existe)..."
-            sudo docker stop jamac-frontend || true
-            sudo docker rm jamac-frontend || true
+            echo "Esperando a que el despliegue esté listo..."
+            kubectl rollout status deployment/jamac-frontend --timeout=180s
 
-            echo "Levantando el contenedor nuevo..."
-            sudo docker run -d \
-              --name jamac-frontend \
-              -p 80:80 \
-              --restart unless-stopped \
-              ${{ env.IMAGE_NAME }}:latest
-
-            echo "Limpiando imágenes viejas sin usar..."
-            sudo docker image prune -f
-
-            echo "✅ Despliegue con Docker completado exitosamente"
+            echo "✅ Despliegue de Frontend con Kubernetes completado exitosamente"

@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jamac-frontend
+  namespace: default
+  labels:
+    app: jamac-frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: jamac-frontend
+  template:
+    metadata:
+      labels:
+        app: jamac-frontend
+    spec:
+      containers:
+      - name: jamac-frontend
+        image: ghcr.io/random0maat/jamac-frontend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 80
+        # Opcional: Recursos recomendados para producción
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+        # Healthcheck básico
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10
